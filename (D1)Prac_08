@@ -1,0 +1,258 @@
+  sample_table = read_csv('https://raw.githubusercontent.com/sjcockell/mmb8052/main/practicals/practical_08/data/sample_table.csv')
+  files = pull(sample_table, Run)
+  files = paste0('counts/', files, '/quant.sf')
+  names(files) = pull(sample_table, Run)
+  gene_map = read_csv('https://github.com/sjcockell/mmb8052/raw/main/practicals/practical_08/extdata/gene_map.csv')
+  txi = tximport(files, 
+                 type='salmon',
+                 tx2gene=gene_map,
+                 ignoreTxVersion=TRUE)
+  View(files)                
+  dds = DESeqDataSetFromTximport(txi, colData = sample_table, design = ~ Group)
+  dds = estimateSizeFactors(dds)
+  dds = estimateDispersions(dds)
+  dds = nbinomWaldTest(dds)
+  par(bg = "grey")
+  DispEst <- plotDispEsts(
+    dds,
+    genecol = "darkorchid4",
+    fitcol = "yellow",
+    finalcol = "aquamarine4",
+    xlab = "Mean of normalized counts",
+    ylab = "Dispersion"
+  )
+  title("Plot of Dispersion Estimates for GSE116583", col.main = "black", font.main = 2, cex.main = 1.5)
+  View(counts(dds, normalized=FALSE)/normalizationFactors(dds))
+  View(counts(dds, normalized=TRUE))
+  group_colors <- setNames(
+    viridis(3), c("Allo24h", "Allo2h", "Naive"))
+  annotation_colors <- list(Group = group_colors)
+  rld = rlog(dds) rlo
+  plotPCA(rld, intgroup='Group') dist(t())
+  sample_distance = dist(t(assay(rld)), method='euclidian')
+  sample_distance_matrix = as.matrix(sample_distance) 
+  pca_data <- plotPCA(rld, intgroup = 'Group', returnData = TRUE)
+  group_colors <- setNames(
+    viridis(3),  
+    c("Allo24h", "Allo2h", "Naive")  
+  )
+  PrettyPCAPlot <- ggplot(pca_data, aes(PC1, PC2, color = Group)) +
+    geom_point(size = 3) +
+    stat_ellipse(type = "norm", level = 0.95, linetype = 2) +  # 95% confidence ellipses
+    scale_color_manual(values = group_colors) +
+    ggtitle("Plot of Principle Components for GSE116583") +
+    xlab(paste0("PC1: ", round(attr(pca_data, "percentVar")[1] * 100, 1), "% variance")) +
+    ylab(paste0("PC2: ", round(attr(pca_data, "percentVar")[2] * 100, 1), "% variance")) +
+    theme_minimal() +
+    theme(panel.background = element_rect(fill = "grey85", color = NA),
+          legend.position = "right", plot.title = element_text(hjust = 0.5, size = 16, face = "bold"))
+  print(PrettyPCAPlot)
+  heatmap_annotation = data.frame(group=colData(dds)[,c('Group')], row.names=rownames(colData(dds)))
+  pheatmap(sample_distance_matrix,
+           clustering_distance_rows=sample_distance,
+           clustering_distance_cols=sample_distance,
+           annotation_col = heatmap_annotation) 
+  colnames(heatmap_annotation) <- "Group"
+  allo24h_color <- group_colors["Allo24h"]  
+  alpha_colors <- alpha(allo24h_color, seq(0, 1, length.out = 100))  
+  PrettyHeatmap <-pheatmap(
+    sample_distance_matrix,
+    clustering_distance_rows = sample_distance,
+    clustering_distance_cols = sample_distance,
+    annotation_col = heatmap_annotation,
+    annotation_colors = annotation_colors,
+    color = alpha_colors,
+    cluster_rows = TRUE,
+    cluster_cols = TRUE,
+    show_rownames = TRUE,
+    show_colnames = TRUE,
+    treeheight_row = 50,
+    treeheight_col = 50,
+    cutree_rows = 3,
+    cutree_cols = 3,
+    display_numbers = TRUE, number_color = "black",
+    main = "Heatmap of Sample Distances for GSE116583",# Apply the custom alpha gradient
+  )
+  results_table_Allo24hvsNaive = results(dds, contrast= c('Group', 'Allo24h', 'Naive'))
+  summary(results_table_Allo24hvsNaive)
+  results_tibble_Allo24hvsNaive = as_tibble(results_table_Allo24hvsNaive, rownames='ensembl_gene_id')
+  filtered_results_Allo24hvsNaive = filter(results_tibble_Allo24hvsNaive, complete.cases(results_table_Allo24hvsNaive)) 
+  filtered_results_Allo24hvsNaive = mutate(filtered_results_Allo24hvsNaive, logPVal = -log10(padj)) 
+  num_genes_to_annotate_Allo24hvsNaive <- 10  
+  top_genes_Allo24hvsNaive <- filtered_results_Allo24hvsNaive %>%
+    arrange(desc(abs(log2FoldChange))) %>%
+    slice_head(n = num_genes_to_annotate_Allo24hvsNaive)
+  Volcano_Allo24hvsNaive <- ggplot(filtered_results_Allo24hvsNaive, aes(x = log2FoldChange, y = logPVal)) + 
+    geom_point(data = filtered_results_Allo24hvsNaive[!(filtered_results_Allo24hvsNaive$padj < 0.05 & abs(filtered_results_Allo24hvsNaive$log2FoldChange) > 1.5), ], 
+               aes(color = FALSE), size = 2, shape = 21, fill = "yellow") +
+    geom_point(data = filtered_results_Allo24hvsNaive[(filtered_results_Allo24hvsNaive$padj < 0.05 & abs(filtered_results_Allo24hvsNaive$log2FoldChange) > 1.5), ], 
+               aes(color = TRUE), size = 2, shape = 21, fill = "darkorchid4") +
+    xlim(-20, 25) +
+    ylim(0,250) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "aquamarine4") +
+    geom_vline(xintercept = c(-1.5, 1.5), linetype = "dashed", color = "aquamarine4") +
+    scale_color_manual(values = c("yellow", "darkorchid4"), 
+                       labels = c("Not Significant", "Significant")) +
+    labs(
+      color = "Significance", 
+      title = "A) Allo24h vs Naive Differential Gene Expression",
+      x = "log2FoldChange",
+      y = "-Log10Padj"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+      axis.title = element_text(size = 14),
+      axis.text = element_text(size = 12),
+      plot.background = element_rect(fill = "grey", color = NA),
+      panel.background = element_rect(fill = "grey", color = NA)
+    )
+  print(Volcano_Allo24hvsNaive)
+  results_table_Allo2hvsNaive = results(dds, contrast= c('Group', 'Allo2h', 'Naive'))
+  summary(results_table_Allo2hvsNaive)
+  results_tibble_Allo2hvsNaive = as_tibble(results_table_Allo2hvsNaive, rownames='ensembl_gene_id')
+  filtered_results_Allo2hvsNaive = filter(results_tibble_Allo2hvsNaive, complete.cases(results_table_Allo2hvsNaive)) 
+  filtered_results_Allo2hvsNaive = mutate(filtered_results_Allo2hvsNaive, logPVal = -log10(padj)) 
+  num_genes_to_annotate_Allo2hvsNaive <- 10  
+  top_genes_Allo2hvsNaive <- filtered_results_Allo2hvsNaive %>%
+    arrange(desc(abs(log2FoldChange))) %>%
+    slice_head(n = num_genes_to_annotate_Allo2hvsNaive)
+  Volcano_Allo2hvsNaive <- ggplot(filtered_results_Allo2hvsNaive, aes(x = log2FoldChange, y = logPVal)) + 
+    geom_point(data = filtered_results_Allo2hvsNaive[!(filtered_results_Allo2hvsNaive$padj < 0.05 & abs(filtered_results_Allo2hvsNaive$log2FoldChange) > 1.5), ], 
+               aes(color = FALSE), size = 2, shape = 21, fill = "yellow") +
+    geom_point(data = filtered_results_Allo2hvsNaive[(filtered_results_Allo2hvsNaive$padj < 0.05 & abs(filtered_results_Allo2hvsNaive$log2FoldChange) > 1.5), ], 
+               aes(color = TRUE), size = 2, shape = 21, fill = "darkorchid4") +
+    xlim(-20, 25) +
+    ylim(0,250) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "aquamarine4") +
+    geom_vline(xintercept = c(-1.5, 1.5), linetype = "dashed", color = "aquamarine4") +
+    scale_color_manual(values = c("yellow", "darkorchid4"), 
+                       labels = c("Not Significant", "Significant")) +
+    labs(
+      color = "Significance", 
+      title = "B) Allo2h vs Naive Differential Gene Expression",
+      x = "log2FoldChange",
+      y = "-Log10Padj"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+      axis.title = element_text(size = 14),
+      axis.text = element_text(size = 12),
+      plot.background = element_rect(fill = "grey", color = NA),
+      panel.background = element_rect(fill = "grey", color = NA)
+    )
+  print(Volcano_Allo2hvsNaive)
+  results_table_Allo24hvsAllo2h = results(dds, contrast= c('Group', 'Allo24h', 'Allo2h'))
+  summary(results_table_Allo24hvsAllo2h)
+  results_tibble_Allo24hvsAllo2h = as_tibble(results_table_Allo24hvsAllo2h, rownames='ensembl_gene_id')
+  filtered_results_Allo24hvsAllo2h = filter(results_tibble_Allo24hvsAllo2h, complete.cases(results_table_Allo24hvsAllo2h)) 
+  filtered_results_Allo24hvsAllo2h = mutate(filtered_results_Allo24hvsAllo2h, logPVal = -log10(padj)) 
+  num_genes_to_annotate_Allo24hvsAllo2h <- 10  
+  top_genes_Allo24hvsAllo2h <- filtered_results_Allo24hvsAllo2h %>%
+    arrange(desc(abs(log2FoldChange))) %>%
+    slice_head(n = num_genes_to_annotate_Allo24hvsAllo2h)
+  Volcano_Allo24hvsAllo2h <- ggplot(filtered_results_Allo24hvsAllo2h, aes(x = log2FoldChange, y = logPVal)) + 
+    geom_point(data = filtered_results_Allo24hvsAllo2h[!(filtered_results_Allo24hvsAllo2h$padj < 0.05 & abs(filtered_results_Allo24hvsAllo2h$log2FoldChange) > 1.5), ], 
+               aes(color = FALSE), size = 2, shape = 21, fill = "yellow") +
+    geom_point(data = filtered_results_Allo24hvsAllo2h[(filtered_results_Allo24hvsAllo2h$padj < 0.05 & abs(filtered_results_Allo24hvsAllo2h$log2FoldChange) > 1.5), ], 
+               aes(color = TRUE), size = 2, shape = 21, fill = "darkorchid4") +
+    xlim(-20, 25) +
+    ylim(0,250) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "aquamarine4") +
+    geom_vline(xintercept = c(-1.5, 1.5), linetype = "dashed", color = "aquamarine4") +
+    scale_color_manual(values = c("yellow", "darkorchid4"), 
+                       labels = c("Not Significant", "Significant")) +
+    labs(
+      color = "Significance", 
+      title = "C) Allo24h vs Allo2h Differential Gene Expression",
+      x = "log2FoldChange",
+      y = "-Log10Padj"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+      axis.title = element_text(size = 14),
+      axis.text = element_text(size = 12),
+      plot.background = element_rect(fill = "grey", color = NA),
+      panel.background = element_rect(fill = "grey", color = NA)
+    )
+  print(Volcano_Allo24hvsAllo2h)
+par()
+  ensembl108 = useEnsembl(biomart="ensembl", version=108)
+  ensembl108 = useDataset("mmusculus_gene_ensembl", mart=ensembl108)
+  annotation_Allo24hvsNaive = getBM(attributes=c('ensembl_gene_id', 'chromosome_name', 
+                                                 'start_position', 'end_position', 
+                                                 'strand', 'gene_biotype', 'external_gene_name', 
+                                                 'description'), 
+                                    filters = 'ensembl_gene_id', values = filtered_results_Allo24hvsNaive$ensembl_gene_id, 
+                                    mart = ensembl108)
+  annot_results_Allo24hvsNaive = left_join(filtered_results_Allo24hvsNaive, annotation_Allo24hvsNaive)
+  annot_results_Allo24hvsNaive = arrange(annot_results_Allo24hvsNaive, padj)
+  View(head(annot_results_Allo24hvsNaive, 10))
+  degs_Allo24hvsNaive = filter(annot_results_Allo24hvsNaive, abs(log2FoldChange) > 1.5 & padj < 0.05)
+  View(head(degs_Allo24hvsNaive, 10))
+  
+  annotation_Allo2hvsNaive = getBM(attributes=c('ensembl_gene_id', 'chromosome_name', 
+                                                'start_position', 'end_position', 
+                                                'strand', 'gene_biotype', 'external_gene_name', 
+                                                'description'), 
+                                   filters = 'ensembl_gene_id', values = filtered_results_Allo2hvsNaive$ensembl_gene_id, 
+                                   mart = ensembl108)
+  annot_results_Allo2hvsNaive = left_join(filtered_results_Allo2hvsNaive, annotation_Allo2hvsNaive)
+  annot_results_Allo2hvsNaive = arrange(annot_results_Allo2hvsNaive, padj)
+  View(head(annot_results_Allo2hvsNaive, 10))
+  degs_Allo2hvsNaive = filter(annot_results_Allo2hvsNaive, abs(log2FoldChange) > 1.5 & padj < 0.05)
+  View(head(degs_Allo2hvsNaive, 10))   
+  
+  annotation_Allo24hvsAllo2h = getBM(attributes=c('ensembl_gene_id', 'chromosome_name', 
+                                                  'start_position', 'end_position', 
+                                                  'strand', 'gene_biotype', 'external_gene_name', 
+                                                  'description'), 
+                                     filters = 'ensembl_gene_id', values = filtered_results_Allo24hvsAllo2h$ensembl_gene_id, 
+                                     mart = ensembl108)
+  annot_results_Allo24hvsAllo2h = left_join(filtered_results_Allo24hvsAllo2h, annotation_Allo24hvsAllo2h)
+  annot_results_Allo24hvsAllo2h = arrange(annot_results_Allo24hvsAllo2h, padj)
+  View(head(annot_results_Allo24hvsAllo2h, 10))
+  degs_Allo24hvsAllo2h = filter(annot_results_Allo24hvsAllo2h, abs(log2FoldChange) > 1.5 & padj < 0.05)
+  View(head(degs_Allo24hvsAllo2h, 10))  
+  
+  format_pvalues <- function(pvalue) {
+    ifelse(pvalue >= 0.001, as.character(round(pvalue, 3)), scientific(pvalue))
+  }
+  
+  top_genes_Allo24hvsNaive <- degs_Allo24hvsNaive %>%
+    arrange(desc(abs(log2FoldChange))) %>%
+    slice_head(n = 10) %>%
+    mutate(across(c(baseMean, log2FoldChange, lfcSE, stat, logPVal), round, 5)) %>% # Round to 5 decimal places
+    mutate(across(c(pvalue, padj), format_pvalues))
+  
+  ft_24hvsNaive <- flextable(top_genes_Allo24hvsNaive) %>%
+    set_caption(caption = "Top 10 Genes: Allo24h vs Naive") %>%
+    add_header_row(values = c("A) Top 10 Differentially Expressed Genes: Allo24h vs Naive"), colwidths = ncol(top_genes_Allo24hvsNaive))
+  
+  save_as_image(ft_24hvsNaive, path = "top_genes_Allo24hvsNaive.png")
+  
+  top_genes_Allo2hvsNaive <- degs_Allo2hvsNaive %>%
+    arrange(desc(abs(log2FoldChange))) %>%
+    slice_head(n = 10) %>%
+    mutate(across(c(baseMean, log2FoldChange, lfcSE, stat, logPVal), round, 5)) %>% # Round to 5 decimal places
+    mutate(across(c(pvalue, padj), format_pvalues))
+  
+  ft_2hvsNaive <- flextable(top_genes_Allo2hvsNaive) %>%
+    set_caption(caption = "Top 10 Genes: Allo2h vs Naive") %>%
+    add_header_row(values = c("B) Top 10 Differentially Expressed Genes: Allo2h vs Naive"), colwidths = ncol(top_genes_Allo2hvsNaive))
+  
+  save_as_image(ft_2hvsNaive, path = "top_genes_Allo2hvsNaive.png")
+  
+  top_genes_Allo24hvsAllo2h <- degs_Allo24hvsAllo2h %>%
+    arrange(desc(abs(log2FoldChange))) %>%
+    slice_head(n = 10) %>%
+    mutate(across(c(baseMean, log2FoldChange, lfcSE, stat, logPVal), round, 5)) %>% # Round to 5 decimal places
+    mutate(across(c(pvalue, padj), format_pvalues))
+  
+  ft_24h2h <- flextable(top_genes_Allo24hvsAllo2h) %>%
+    set_caption(caption = "Top 10 Genes: Allo24h vs Allo2h") %>%
+    add_header_row(values = c("C) Top 10 Differentially Expressed Genes: Allo24h vs Allo2h"), colwidths = ncol(top_genes_Allo24hvsAllo2h))
+  
+  save_as_image(ft_24h2h, path = "top_genes_Allo24hvsAllo2h.png") 
